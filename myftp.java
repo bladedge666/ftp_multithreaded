@@ -159,7 +159,10 @@ public class myftp {
 	            if(bytesRead%1000==0) {
 	            	if(!runningGetCommands.contains(commandID)) {  //searches for commandID in runningGetCommands
 	            		terminate=true;
+	            		output.writeUTF("terminate");
 	            		break;
+	            	}else {
+	            		output.writeUTF("continue");
 	            	}
 	            }
 	          }

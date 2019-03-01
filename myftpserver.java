@@ -4,23 +4,23 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Scanner;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantLock;
 //import com.google.common.collect.Multimap;
 //import com.google.common.collect.ArrayListMultimap;
-import java.util.concurrent.locks.ReentrantReadWriteLock;;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
+
 
 /**
  * This is the FTP server for the project. The main method works as the driver
  * and calls the start method which boots up the server and allows it to serve
  * requests from the client.
  */
-public class myftpserver{
 
-	//remove these to in the end to make take command line arguements
-//  public static final int NPORT = 4445;
-//  public static final int TPORT = 5555;
+public class myftpserver{
 
   private static final Scanner scan = new Scanner(System.in);
 
@@ -29,7 +29,6 @@ public class myftpserver{
 	  int tport=Integer.parseInt(args[1]);
 	  new NormalPortThread(nport);
 	  new TerminatePortThread(tport);
-
   } // end main
 
 
@@ -88,7 +87,7 @@ class NormalPortThread implements Runnable{
 	public static Socket client=null;
 	Thread normalThread;
 	public static int NPORT;
-	  
+
 	NormalPortThread(int nport) {
 		normalThread=new Thread(this);
 		System.out.println("Normal port thread created...");
@@ -123,13 +122,15 @@ class NormalPortThread implements Runnable{
 
 //class for creating thread on every client connection
 class NewThread implements Runnable{
-	
-	public static Map<String,List<String>> FileManager = new HashMap<>();  //keeps track of file names and commands running on them
+	public static Map<String, ReadWriteLock> lockManager = new HashMap<String, ReadWriteLock>();  //keeps track of files and their acquired locks
+	public static Lock registryLock = new ReentrantLock();
 	public static ArrayList<String> runningCommands=new ArrayList<String>(); //keeps the track of command IDs, helps in termination of commands
 	private final static String FILE_SEP = System.getProperty("file.separator");
 	private final static int BUFFER_SIZE = 1000;
 	public static int clientCount=0;
 	public static int commandID=0;  //increases on every get and put command  
+	
+	
 	
 	Thread t;
 	Socket client;
@@ -156,12 +157,7 @@ class NewThread implements Runnable{
 			System.out.println("New client connected " +Thread.currentThread().getName());
 			System.out.println("Connection estblished!");
 			String presentWD = System.getProperty("user.dir");
-			List<String> commands=new ArrayList<>(); //helps in updating the FileManager hashmap 
 		
-			ReentrantReadWriteLock lock=new ReentrantReadWriteLock(true);
-			ReentrantReadWriteLock.ReadLock getLock=lock.readLock(); //readLock
-			ReentrantReadWriteLock.WriteLock putLock=lock.writeLock(); //writeLock
-
 			String command[] = null;
 			System.out.println("Waiting for a command...");
 			
@@ -178,67 +174,11 @@ class NewThread implements Runnable{
 			            
 			            output.writeUTF(String.valueOf(sendFile.exists()));
 			            System.out.println("FILE---> " + sendFile.getTotalSpace());
-			            
-			            if (sendFile.exists()) {
-			            	currentThreadCommandID=++commandID;
-			            	runningCommands.add(""+currentThreadCommandID);
-			            	output.writeUTF(""+ currentThreadCommandID);
-			            	if (!FileManager.containsKey(command[1])) { //checks if file name exists in FileManager map 
-			            		commands.add("get");
-			            		FileManager.put(command[1],commands);
-				        		get(command[1],presentWD,currentThreadCommandID);
-				        		commands=FileManager.get(command[1]);
-				        		commands.remove("get");
-				        		if(commands.isEmpty()) {
-				        			FileManager.remove(command[1]);
-				        		}
-				        		else {
-				        			FileManager.replace(command[1], commands);
-				        		}
-				        	  }else {
-				        		  commands=FileManager.get(command[1]);
-				        	  if (commands.contains("put")) {  //if put is waiting for running on the current file go ahead and wait for a lock
-				        		  try {
-				        			  getLock.lock();
-				        			  commands=FileManager.get(command[1]);
-				        			  commands.add("get");
-				        			  FileManager.put(command[1],commands);
-				        			  get(command[1],presentWD,currentThreadCommandID);
-				        			  commands=FileManager.get(command[1]);
-				        			  commands.remove("get");
-				        			  if(commands.isEmpty()) {
-						        			FileManager.remove(command[1]);
-						        		}
-						        		else {
-						        			FileManager.replace(command[1], commands);
-						        		}
-				        		  }
-				        		  catch(Exception e) {
-				        			  System.out.println(e);
-				        		  }
-				        		  finally {
-				        			  getLock.unlock();
-				        		  }
-				        		}
-				        	  else {  //if get is running on the file then go ahead
-				        		  commands=FileManager.get(command[1]);
-			        			  commands.add("get");
-			        			  FileManager.put(command[1],commands);
-			        			  get(command[1],presentWD,currentThreadCommandID);
-			        			  commands=FileManager.get(command[1]);
-			        			  commands.remove("get");
-			        			  if(commands.isEmpty()) {
-					        			FileManager.remove(command[1]);
-					        		}
-					        		else {
-					        			FileManager.replace(command[1], commands);
-					        		}
-				        	  }
-				        	}
-			            } 
-			          }
-
-			          // If no file is specified as the argument
+			            currentThreadCommandID=++commandID;
+		            	runningCommands.add(""+currentThreadCommandID);
+		            	output.writeUTF(""+ currentThreadCommandID);
+			            acquire(command[1],"get",presentWD,currentThreadCommandID);
+			            }
 			          else {
 			            output.writeUTF("You must specify a path after a get command.");
 			          }
@@ -248,77 +188,11 @@ class NewThread implements Runnable{
 			        case "put":
 			        	
 			          if ((command.length == 2 || command.length==3)&& input.readUTF().equals("true")) {
-
 			        	  currentThreadCommandID=++commandID;
 			        	  runningCommands.add(""+currentThreadCommandID);
 			        	  output.writeUTF(""+ currentThreadCommandID);
-			        		  
-			        		  if(!FileManager.containsKey(command[1])) {  //checks if file is not in the FileManager 
-			        			  
-			        			  commands.add("put");
-			        			  FileManager.put(command[1],commands);
-			        			  put(command[1],presentWD,currentThreadCommandID);
-			        			  commands=FileManager.get(command[1]);
-			        			  commands.remove("put");
-			        			  if(commands.isEmpty()) {
-			        				  FileManager.remove(command[1]);
-			        			  }else {
-			        				  FileManager.put(command[1],commands);
-			        			  }  
-				        	  }else {
-				        		  commands=FileManager.get(command[1]);
-				        		  if(commands.contains("get") && !commands.contains("put")) { //if FileManager does not contain put
-					        		  commands.add("put");
-					        		  FileManager.put(command[1],commands);
-			
-					        		  try {
-					        			  putLock.lock();
-					        			  put(command[1],presentWD,currentThreadCommandID);
-					        			  commands=FileManager.get(command[1]);
-					        			  commands.remove("put");
-					        			  if(commands.isEmpty()) {
-							        			FileManager.remove(command[1]);
-							        		}
-							        		else {
-							        			FileManager.replace(command[1], commands);
-							        		}
-					        		  }
-					        		  catch(Exception e) {
-					        			  System.out.println(e);
-					        		  }
-					        		  finally {
-					        			  putLock.unlock();
-					        		  }  
-					        	  }		
-				        		  else {
-				        			  try {
-					        			  putLock.lock();
-					        			  commands=FileManager.get(command[1]);
-					        			  commands.add("put");
-					        			  FileManager.put(command[1],commands);
-					        			  put(command[1],presentWD,currentThreadCommandID);
-					        			  commands=FileManager.get(command[1]);
-					        			  commands.remove("put");
-					        			  if(commands.isEmpty()) {
-							        			FileManager.remove(command[1]);
-							        		}
-							        		else {
-							        			FileManager.replace(command[1], commands);
-							        		}
-					        		  }
-					        		  catch(Exception e) {
-					        			  System.out.println(e);
-					        		  }
-					        		  finally {
-					        			  putLock.unlock();
-					        		  }
-				        		  }
-				        	  } 
-//			        	  }else {
-//			        		  output.writeUTF("File does not exist!");
-//			        	  }		            
+			        	  acquire(command[1],"put",presentWD,currentThreadCommandID);
 			          }
-
 			          else {
 			            output.writeUTF("You must specify a path after a put command.");
 			          }
@@ -429,7 +303,43 @@ class NewThread implements Runnable{
 		} catch (Exception e) {
 			e.printStackTrace();
 		}	
-	}	
+	}
+	
+	//this method helps the to acquire locks for get and put
+	public void acquire(String fileName, String type,String presentWD,int currentThreadCommandID) {
+	    ReadWriteLock lock = retrieveLock(fileName);
+
+	    switch (type) {
+	    case "get":
+	        lock.readLock().lock();
+	        get(fileName,presentWD,currentThreadCommandID);
+	        lock.readLock().unlock();
+	        break;
+	    case "put":
+	        lock.writeLock().lock();
+	        put(fileName,presentWD,currentThreadCommandID);
+	        lock.writeLock().unlock();
+	        break;
+	    }
+	}
+	
+	//this method helps to get the type of lock currently acquired by the file
+	public ReadWriteLock retrieveLock(String fileName) {
+	    ReadWriteLock newLock = null;
+	    
+	    try {
+	        registryLock.lock();
+	        newLock = lockManager.get(fileName);
+	        if (newLock == null) {
+	            newLock = new ReentrantReadWriteLock();
+	            lockManager.put(fileName, newLock);
+	        }
+	    } finally {
+	        registryLock.unlock();
+	    }
+	    
+	    return newLock;
+	}
 	
 	public void get(String fileName, String presentWD,int commandID) {
 		if(runningCommands.contains(""+commandID)) {
@@ -438,8 +348,8 @@ class NewThread implements Runnable{
 				File sendFile = new File(presentWD + FILE_SEP + fileName);
 				FileInputStream fileInStream = new FileInputStream(sendFile);
 				
-				DataInputStream getInput=new DataInputStream(new BufferedInputStream(client.getInputStream()));
-				DataOutputStream getOutput = new DataOutputStream(client.getOutputStream());
+				DataInputStream input=new DataInputStream(new BufferedInputStream(client.getInputStream()));
+				DataOutputStream output = new DataOutputStream(client.getOutputStream());
 		        System.out.println(fileInStream.available() + " bytes!");
 		        
 		        byte[] buffer = new byte[(int) sendFile.length()];
@@ -447,13 +357,13 @@ class NewThread implements Runnable{
 		        DataInputStream dis = new DataInputStream(fileInStream);
 
 		        boolean terminated=false;
-		        String getFilePath=getInput.readUTF();
+		        String getFilePath=input.readUTF();
 		        String status;
 		        System.out.println("Getfilepath "+getFilePath);
 		        int pointer=0;
-		        String requestStatus;
+//		        String requestStatus;
 		        if(NewThread.runningCommands.contains(""+commandID)) {
-		        	getOutput.writeLong(buffer.length); // send the size of the file
+		        	output.writeLong(buffer.length); // send the size of the file
 		        	int fileSize=buffer.length;
 		        	int readChars;
 
@@ -464,12 +374,17 @@ class NewThread implements Runnable{
 		        				readChars=1;
 		        			}
 		        			dis.read(buffer, pointer, readChars); 
-		        			getOutput.write(buffer, pointer, readChars); 
+		        			output.write(buffer, pointer, readChars); 
 		        			if(readChars%1000==0) {
-			        			if(!NewThread.runningCommands.contains(""+commandID)) { //checks if command is still in the arraylast
-				        				terminated=true;
-				        				break;
-				        			}
+		        				status=input.readUTF();
+		        				if(status.equals("terminate")) {
+		        					terminated=true;
+		        					break;
+		        				}
+//			        			if(!NewThread.runningCommands.contains(""+commandID)) { //checks if command is still in the arraylast
+//				        				terminated=true;
+//				        				break;
+//				        			}
 			        	        }
 		        			}
 		        			fileInStream.close();
