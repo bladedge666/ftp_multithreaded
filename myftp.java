@@ -23,8 +23,8 @@ public class myftp {
 	public static void main(String[] args) throws IOException, ClassNotFoundException {
 		String machineName = null;
 		Socket server = null;
-		int tport=-1;
-		int nport=-1;
+		int tport = -1;
+		int nport = -1;
 
 		try {
 			machineName = args[0];
@@ -186,6 +186,7 @@ public class myftp {
 			Thread.sleep(1000);
 		} catch (Exception e) {
 			System.out.println(e);
+			e.printStackTrace();
 		}
 	}
 

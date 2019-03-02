@@ -79,6 +79,7 @@ class TerminatePortThread implements Runnable {
 				terminatingClient.close();
 			} catch (Exception e) {
 				System.out.println("Error: " + e);
+				e.printStackTrace();
 			}
 		}
 	}
@@ -113,7 +114,6 @@ class NormalPortThread implements Runnable {
 				try {
 					serverSocket.close();
 				} catch (IOException e1) {
-					// TODO Auto-generated catch block
 					e1.printStackTrace();
 				}
 			}
